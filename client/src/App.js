@@ -80,8 +80,7 @@ function App() {
 
   const getTokenContracts = async (symbols, bankContract, provider) => {
     symbols.map(async (symbol) => {
-      const contract = await getTokenContract;
-      symbol, bankContract, provider;
+      const contract = await getTokenContract(symbol, bankContract, provider);
       setTokenContracts((prev) => ({ ...prev, [symbol]: contract }));
     });
   };
