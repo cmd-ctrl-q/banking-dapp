@@ -1,6 +1,7 @@
 import './App.css';
 import { ethers } from 'ethers';
 import { useEffect, useState } from 'react';
+import Modal from './Modal';
 
 // import artifacts
 import bankArtifact from './artifacts/contracts/Bank.sol/Bank.json';
@@ -10,7 +11,7 @@ import usdtArtifact from './artifacts/contracts/Usdt.sol/Usdt.json';
 
 function App() {
   // interacts with the blockchain
-  const [proivder, setProvider] = useState(undefined);
+  const [provider, setProvider] = useState(undefined);
   // interact with blockchain as a user
   const [signer, setSigner] = useState(undefined);
   // wallet interacting with dapp
@@ -39,10 +40,12 @@ function App() {
   // connect to metamask
   useEffect(() => {
     const init = async () => {
-      const provider = await new ethers.providers.Web3Provider(window.ethereum);
+      const provider = new ethers.providers.Web3Provider(window.ethereum);
       setProvider(provider);
 
-      const bankContract = await new ethers.Contract(
+      console.log(process.env.REACT_APP_BANK_CONTRACT_ADDRESS);
+
+      const bankContract = new ethers.Contract(
         process.env.REACT_APP_BANK_CONTRACT_ADDRESS,
         bankArtifact.abi
       );
@@ -87,16 +90,133 @@ function App() {
 
   const isConnected = () => signer !== undefined;
 
+  const getSigner = async (provider) => {
+    provider.send('eth_requestAccounts', []);
+    const signer = provider.getSigner();
+
+    // get signers addr
+    signer.getAddress().then((address) => {
+      setSignerAddress(address);
+    });
+
+    return signer;
+  };
+
+  const connect = () => {
+    getSigner(provider).then((signer) => {
+      setSigner(signer);
+      getTokenBalances(signer);
+    });
+  };
+
+  // returns a user's balance for a specific token
+  const getTokenBalance = async (symbol, signer) => {
+    // connect the signer as the wallet
+    const balance = await bankContract
+      .connect(signer)
+      .getTokenBalance(toBytes32(symbol));
+    return toEther(balance);
+  };
+
+  const getTokenBalances = (signer) => {
+    tokenSymbols.map(async (symbol) => {
+      const balance = await getTokenBalance(symbol, signer);
+      setTokenBalances((prev) => ({ ...prev, [symbol]: balance.toString() }));
+    });
+  };
+
+  const displayModal = (symbol) => {
+    setSelectedSymbol(symbol);
+    setShowModal(true);
+  };
+
+  const depositTokens = (wei, symbol) => {
+    if (symbol === 'Eth') {
+      signer.sendTransaction({
+        to: bankContract.address,
+        value: wei,
+      });
+    } else {
+      const tokenContract = tokenContracts[symbol];
+      // approve signer before depositing tokens
+      tokenContract
+        .connect(signer)
+        .approve(bankContract.address, wei)
+        .then(() => {
+          bankContract.connect(signer).depositTokens(wei, toBytes32(symbol));
+        });
+    }
+  };
+
+  const withdrawTokens = (wei, symbol) => {
+    if (symbol === 'Eth') {
+      bankContract.connect(signer).withdrawEther(wei);
+    } else {
+      bankContract.connect(signer).withdrawTokens(wei, toBytes32(symbol));
+    }
+  };
+
+  const depositOrWithdraw = (e, symbol) => {
+    e.preventDefault(); // prevent page refreshing
+    const wei = toWei(amount);
+
+    if (isDeposit) {
+      depositTokens(wei, symbol);
+    } else {
+      withdrawTokens(wei, symbol);
+    }
+  };
+
   return (
     <div className='App'>
       <header className='App-header'>
         {isConnected() ? (
           <div>
             <p>Welcome {signerAddress?.substring(0, 10)}...</p>
+            <div className='list-group'>
+              <div className='list-group-item'>
+                {Object.keys(tokenBalances).map((symbol, idx) => (
+                  <div className='row d-flex py-3' key={idx}>
+                    {/* <div className='col-md-1'></div> */}
+
+                    <div className='col-md-6'>
+                      <div>{symbol.toUpperCase()}</div>
+                    </div>
+
+                    <div className='d-flex gap-4 col-md-3'>
+                      <small className='opacity-50 text-nowrap'>
+                        {toRound(tokenBalances[symbol])}
+                      </small>
+                    </div>
+
+                    <div className='d-flex gap-4 col-md-5'>
+                      <button
+                        onClick={() => displayModal(symbol)}
+                        className='btn btn-primary'
+                      >
+                        Deposit/Withdraw
+                      </button>
+                      <Modal
+                        show={showModal}
+                        onClose={() => setShowModal(false)}
+                        symbol={selectedSymbol}
+                        depositOrWithdraw={depositOrWithdraw}
+                        isDeposit={isDeposit}
+                        setIsDeposit={setIsDeposit}
+                        setAmount={setAmount}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         ) : (
           <div>
             <p>You are not connected</p>
+            <button onClick={connect} className='btn btn-primary'>
+              Connect Metamask
+            </button>
           </div>
         )}
       </header>
